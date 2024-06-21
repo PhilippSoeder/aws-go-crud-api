@@ -5,7 +5,6 @@ import (
 	"log/slog"
 
 	"github.com/aws/aws-lambda-go/events"
-	"github.com/guregu/dynamo/v2"
 	"github.com/philippsoeder/aws-go-crud-api/internal/db"
 	"github.com/philippsoeder/aws-go-crud-api/internal/models"
 	"github.com/philippsoeder/aws-go-crud-api/pkg/logger"
@@ -41,19 +40,17 @@ func HandleGetNoteByID(request events.APIGatewayProxyRequest) (events.APIGateway
 	noteID := request.PathParameters["note-id"]
 	result, err := db.GetNoteByID(noteID)
 	if err != nil {
-		// FIXME: it should be irrelevant if dynamo is used or something else
-		if err == dynamo.ErrNotFound {
-			return events.APIGatewayProxyResponse{
-				StatusCode: 404,
-				Body:       "Note not found",
-			}, nil
-		} else {
-			log.Error("Error getting note", "error", err)
-			return events.APIGatewayProxyResponse{
-				StatusCode: 500,
-				Body:       "Internal server error",
-			}, nil
-		}
+		log.Error("Error getting note", "error", err)
+		return events.APIGatewayProxyResponse{
+			StatusCode: 500,
+			Body:       "Internal server error",
+		}, nil
+	}
+	if result.ID == "" {
+		return events.APIGatewayProxyResponse{
+			StatusCode: 404,
+			Body:       "Note not found",
+		}, nil
 	}
 	jsonBody, err := json.Marshal(result)
 	if err != nil {

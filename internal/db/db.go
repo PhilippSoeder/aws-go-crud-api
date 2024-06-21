@@ -7,37 +7,55 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/google/uuid"
-	"github.com/guregu/dynamo/v2"
 	"github.com/philippsoeder/aws-go-crud-api/internal/models"
 	"github.com/philippsoeder/aws-go-crud-api/pkg/logger"
 )
 
-var notesTable dynamo.Table
 var log *slog.Logger
+var ddbClient *dynamodb.Client
+var notesTable string
 
 func init() {
 	log = logger.GetLogger()
 	ddbRegion := os.Getenv("DYNAMODB_REGION")
-	ddbTableName := os.Getenv("DYNAMODB_TABLE_NAME")
+	notesTable = os.Getenv("DYNAMODB_TABLE_NAME")
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(ddbRegion))
 	if err != nil {
 		log.Error("unable to load SDK config.", "error", err)
 	}
-	ddb := dynamo.New(cfg)
-	notesTable = ddb.Table(ddbTableName)
+	ddbClient = dynamodb.NewFromConfig(cfg)
 	log.Debug("Initializing DynamoDB table finished.")
 }
 
 func GetAllNotes() ([]models.Note, error) {
 	var notes []models.Note
-	err := notesTable.Scan().All(context.TODO(), &notes)
+	scan, err := ddbClient.Scan(context.TODO(), &dynamodb.ScanInput{
+		TableName: &notesTable,
+	})
+	if err != nil {
+		log.Error("Got error calling Scan", "error", err)
+	}
+	err = attributevalue.UnmarshalListOfMaps(scan.Items, &notes)
 	return notes, err
 }
 
 func GetNoteByID(id string) (*models.Note, error) {
 	var note models.Note
-	err := notesTable.Get("ID", id).One(context.TODO(), &note)
+	result, err := ddbClient.GetItem(context.TODO(), &dynamodb.GetItemInput{
+		TableName: &notesTable,
+		Key: map[string]types.AttributeValue{
+			"ID": &types.AttributeValueMemberS{Value: id},
+		},
+	})
+	if err != nil {
+		log.Error("Got error calling GetItem", "error", err)
+		return nil, err
+	}
+	err = attributevalue.UnmarshalMap(result.Item, &note)
 	return &note, err
 }
 
@@ -47,27 +65,47 @@ func InsertNote(note models.Note) (models.Note, error) {
 	}
 	note.CreatedAt = time.Now().String()
 	note.UpdatedAt = note.CreatedAt
-	err := notesTable.Put(note).Run(context.TODO())
+	item, err := attributevalue.MarshalMap(note)
+	if err != nil {
+		return note, err
+	}
+	_, err = ddbClient.PutItem(context.TODO(), &dynamodb.PutItemInput{
+		TableName: &notesTable,
+		Item:      item,
+	})
 	return note, err
 }
 
 func UpdateNoteByID(id string, note models.Note) error {
-	upd := notesTable.Update("ID", id)
-	newTitle := note.Title
-	if newTitle != "" {
-		upd.Set("title", newTitle)
+	updateExpression := "SET "
+	expressionAttributeValues := make(map[string]types.AttributeValue)
+	if note.Title != "" {
+		updateExpression += "Title = :t, "
+		expressionAttributeValues[":t"] = &types.AttributeValueMemberS{Value: note.Title}
 	}
-	newContent := note.Content
-	if newContent != "" {
-		upd.Set("content", newContent)
+	if note.Content != "" {
+		updateExpression += "Content = :c, "
+		expressionAttributeValues[":c"] = &types.AttributeValueMemberS{Value: note.Content}
 	}
-	note.UpdatedAt = time.Now().String()
-	upd.Set("updated_at", note.UpdatedAt)
-	err := upd.Run(context.TODO())
+	updateExpression += "UpdatedAt = :u"
+	expressionAttributeValues[":u"] = &types.AttributeValueMemberS{Value: time.Now().String()}
+	_, err := ddbClient.UpdateItem(context.TODO(), &dynamodb.UpdateItemInput{
+		TableName: &notesTable,
+		Key: map[string]types.AttributeValue{
+			"ID": &types.AttributeValueMemberS{Value: id},
+		},
+		UpdateExpression:          &updateExpression,
+		ExpressionAttributeValues: expressionAttributeValues,
+	})
 	return err
 }
 
 func DeleteNoteByID(id string) error {
-	err := notesTable.Delete("ID", id).Run(context.TODO())
+	_, err := ddbClient.DeleteItem(context.TODO(), &dynamodb.DeleteItemInput{
+		TableName: &notesTable,
+		Key: map[string]types.AttributeValue{
+			"ID": &types.AttributeValueMemberS{Value: id},
+		},
+	})
 	return err
 }

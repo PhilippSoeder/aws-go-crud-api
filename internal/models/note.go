@@ -1,9 +1,9 @@
 package models
 
 type Note struct {
-	ID        string `json:"id" dynamo:"ID,hash"`
-	Title     string `json:"title" dynamo:"title"`
-	Content   string `json:"content" dynamo:"content"`
-	CreatedAt string `json:"createdAt" dynamo:"created_at"`
-	UpdatedAt string `json:"updatedAt" dynamo:"updated_at"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
 }
